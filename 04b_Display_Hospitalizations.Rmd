@@ -1,0 +1,93 @@
+---
+title: "04b_Display_Hospitalizations"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(labelled)
+library(rmarkdown)
+library(Hmisc)
+library(knitr)
+library(kableExtra)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+process_uptake_df = function(z_df) {
+  # Label the various columns for the table 1 package
+  # so they look nice
+  z_df = z_df %>% mutate(Value = TRUE)
+  z_df$Sex = factor(z_df$subject_sex)
+  label(z_df$Sex) = "Sex"
+  label(z_df$age_gp) = "Age"
+  #label(z_df$vacc_type) = "1st Dose Type"
+  #label(z_df$vacc_type_2) = "2nd Dose Type"
+  return(z_df)
+}
+```
+
+### Number of hospitializations
+```{r}
+print(nrow(df_eave_hosp))
+```
+
+### Number of different children
+```{r}
+print(length(unique(df_eave_hosp$EAVE_LINKNO)))
+```
+
+## Display Hospitalizations
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+z = df_eave_hosp
+
+variables = c("vacc_1_dose", "vacc_2_dose", "vacc_3_dose")#, )
+
+z = process_uptake_df(z)
+
+z$vs = factor(z$vs)
+z$num_prev_admissions = factor(z$num_prev_admissions)
+label(z$num_prev_admissions) = "No. Previous Admissions"
+z$hosp_los_factor = cut(as.numeric(z$hosp_los), c(-1, 0, 1, 2, 7, max(z$hosp_los)), right=TRUE)
+label(z$hosp_los_factor) = "Hospital Length of Stay"
+label(z$simd2020_sc_quintile) = "SIMD"
+
+z = z %>% mutate(vacc_1_dose = factor(is.na(z$date_vacc_1), labels=c("Vaccinated", "Unvaccinated")))
+z = z %>% mutate(vacc_2_dose = factor(is.na(z$date_vacc_2), labels=c("Vaccinated", "Unvaccinated")))
+z = z %>% mutate(vacc_3_dose = factor(is.na(z$date_vacc_3), labels=c("Vaccinated", "Unvaccinated")))
+label(z$vacc_1_dose) = "1st Dose"
+label(z$vacc_2_dose) = "2nd Dose"
+label(z$vacc_3_dose) = "3rd Dose"
+
+z_inp = z %>% select(vacc_1_dose, vacc_2_dose, vacc_3_dose, age_gp, Sex, 
+                     simd2020_sc_quintile, vs, num_prev_admissions,
+                     hosp_los_factor, eave_weight)
+z_inp$Value = TRUE
+z_inp$Value = factor(z_inp$Value)
+#summary_factorlist_tm(z_inp, "Value", c("vacc_1_dose", "vacc_2_dose"))
+kable(summary_factorlist_wt(z, "Value", c("Sex", "simd2020_sc_quintile")))#,"age_gp", "vacc_1_dose", "vacc_2_dose", "vacc_3_dose", "num_prev_admissions", "hosp_los_factor", "vs"))) %>% kable_styling(bootstrap_options = "bordered")
+```
+
+## Do any of these children have any QCOVID comorbidities?
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+qcovid_columns = grepl("Q_" ,names(z))
+qcovid_columns_names = names(z)[qcovid_columns]
+
+z[, qcovid_columns] = lapply(z[,qcovid_columns], factor)
+
+# Remove BMI cos it has lots of levels we don't care about
+qcovid_columns_names = qcovid_columns_names[qcovid_columns_names != "Q_BMI"]
+qcovid_columns[qcovid_columns_names == "Q_BMI"] = FALSE
+
+# Create an extra column to hold if the person has a qcovid comorbidity
+qcovid_comorbidity = apply(z[,qcovid_columns], 1, function(r) any(r == 1))
+
+# Remove any conditions which don't have any people in them
+qcovid_counts_idx = colSums(z[, qcovid_columns] == 1) > 0
+qcovid_columns = qcovid_columns[qcovid_counts_idx]
+qcovid_columns_names = qcovid_columns_names[qcovid_counts_idx]
+
+z$qcovid_comorbidity = factor(qcovid_comorbidity)
+qcovid_columns_names = c(qcovid_columns_names, "qcovid_comorbidity")
+z$Value = TRUE
+kable(summary_factorlist_wt(z, "Value", qcovid_columns_names)) %>% kable_styling(bootstrap_options = "bordered")
+```

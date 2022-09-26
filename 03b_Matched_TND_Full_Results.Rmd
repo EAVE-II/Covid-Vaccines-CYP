@@ -1,0 +1,435 @@
+---
+title: "Full Model - Covid-19 vaccine waning EAVE Cohort - VE relative to unvaccinated - TND in CHILDREN 12-17"
+author: "Chris Robertson, Tristan Millington, Aziz Sheikh"
+date: ' `r format(Sys.Date(), "%d %B %Y")` '
+output: html_document
+---
+
+```{r setup, include=FALSE,echo = FALSE, warning=FALSE, error=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, error=FALSE)
+
+# 01 Setup ####
+#Libraries
+library(tidyverse)
+library(survival)
+library(gridExtra)
+library(ggplot2)
+#library(htmltools)
+#Load data
+
+Location <- "/conf/"  # Server
+#Location <- "//isdsf00d03/"  # Desktop
+project_path <- paste0(Location,"EAVE/GPanalysis/progs/TM/vaccine_uptake_and_effectiveness_in_children")
+
+source(paste0(project_path,"/00_Functions.R"))
+
+#df_cc <- readRDS(paste0(project_path,"/output/temp/df_cc_pos_test.RDS")) %>% 
+#  mutate(age_gp = factor(ageYear) )
+
+```
+
+
+# Number of tests and sgene status
+```{r, results='asis', include=TRUE}
+
+z_df_tests = df_s_gene
+z_df_tests$t = z_df_tests$event_date - a_begin_16_17
+
+number_tests = z_df_tests %>% filter(event == 1) %>%
+                 dplyr::count(t) %>% 
+                mutate(date = t + a_begin_16_17) 
+
+number_s_gene_missing = z_df_tests %>% filter(!is.na(sgene_classification) & event == 1) %>% 
+                   dplyr::count(t) %>% 
+                mutate(date = t + a_begin_16_17) 
+
+g = ggplot() + 
+  geom_line(number_tests, mapping=aes(x=date, y=n), color="blue") + 
+  geom_line(number_s_gene_missing, mapping=aes(x = date, y = n), color="red") + 
+  xlab("Date") + ylab("Number of tests") + scale_x_date(breaks="1 month", date_labels="%b %Y") +
+  geom_vline(xintercept = as.Date("2021-11-01")) + geom_vline(xintercept = as.Date("2022-01-15")) + theme_bw()
+#plot(number_s_gene_missing$date,number_s_gene_missing$n, col='red', axes = TRUE, xlab = "Month and Year", ylab = "Number of #tests", xlim=c(a_begin_16_17, a_end), ylim=c(0, max(number_tests$n)))
+#points(number_tests$date ,number_tests$n, col="blue")
+print(g)
+```
+
+# Fraction of tests missing s gene status
+
+```{r, results='asis', include=TRUE}
+
+z_df_tests = df_s_gene
+z_df_tests$t = z_df_tests$event_date - a_begin_16_17
+
+number_tests = z_df_tests %>% filter(event == 1) %>%
+                 dplyr::count(t) %>% 
+                mutate(date = t + a_begin_16_17) 
+
+number_s_gene_missing = z_df_tests %>% filter(is.na(sgene_classification) & event == 1) %>% 
+                   dplyr::count(t) %>% 
+                mutate(date = t + a_begin_16_17) 
+
+z = number_tests %>% rename(n_tests = n) %>% left_join(number_s_gene_missing, by="date") %>% rename(n_sgene_missing = n)
+
+z[is.na(z$n_sgene_missing),]$n_sgene_missing = 0
+
+z$frac_missing = z$n_sgene_missing / z$n_tests
+
+g = ggplot() + geom_line(z, mapping=aes(x=date, y=frac_missing), color="blue") + xlab("Date") + 
+  ylab("Fraction of tests missing an sgene status") + geom_vline(xintercept = as.Date("2021-11-01")) +       
+  geom_vline(xintercept = as.Date("2022-01-15")) + scale_x_date(breaks="1 month", date_labels="%b %Y") + theme_bw()
+print(g)
+```
+
+# 16 - 17 year olds
+
+##Pfizer Vaccine for dose 1 and 2 
+###Risk Ratios
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+options(knitr.kable.NA = '')
+
+z_df <- df_cc_16_17 %>% filter(vacc_type %in% c("uv", "PB"))
+    
+eqn = as.formula(paste("event"," ~ strata(EAVE_LINKNO_pos) + vs + ",
+            paste(variables_hosp, collapse= " + ")))
+
+ret = run_model(eqn, z_df, "event")
+
+z_g = ret$z_g
+z3 = ret$z3
+z1 = ret$z1
+
+z_g_2 = fun_plot_tnd_cc(z1, "", title="16 - 17 Years - All")
+print(z_g_2)
+```
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+z_g_3 = fun_plot_tnd_ve(z3, "")
+print(z_g_3)
+
+```
+
+###Vaccine Effects
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+
+z_tab <- kableExtra::kbl(z3, 
+                         caption = "Numbers and Vaccine Effects", digits=c(NA,0,0,1,1,1),
+                         col.names = c("Vaccine Status","N","Events", "VE", "LCL","UCL"),
+                         format = "pipe") %>%
+  kableExtra::kable_classic(full_width = F, html_font = "Cambria", position = "left") %>%
+  kableExtra::column_spec(1:6, width="5em") %>% 
+  #kableExtra::column_spec(c(4,7,10), width="5em") %>% 
+  #kableExtra::add_header_above(c(" " = 4, "Rate Ratio" = 3, "Vaccine Effect" = 3))
+
+print(z_tab)
+
+```
+
+##Pfizer Vaccine for dose 1 and 2 S Positive (Delta infections) 
+###Risk Ratios
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+options(knitr.kable.NA = '')
+
+z_df <- df_cc_16_17 %>% filter(vacc_type %in% c("uv", "PB"))
+
+# Remove any later vaccine statuses - they just mess up the figures and don't contribute to any events
+z_df = z_df %>% filter(!(vs == "v2_10:13" | vs == "v2_14+"))
+z_df$vs = droplevels(z_df$vs)
+z_df$vs = fct_recode(z_df$vs, "v2_6+" = "v2_6:9")
+#z_df_cc$vs = factor(z_df_cc$vs, levels = c("uv", "v1_0:1", "v1_2:5", "v1_6:9", "v1_10:13", "v1_14:17", "v1_18+", "v2_0:1", "v2_2:5", "v2_6+"))
+
+eqn = as.formula(paste("event_s_pos"," ~ strata(EAVE_LINKNO_pos) + vs + ",
+            paste(variables_hosp, collapse= " + ")))
+              
+ret = run_model(eqn, z_df, "event_s_pos")
+
+z_g = ret$z_g
+z3 = ret$z3
+z1 = ret$z1
+
+z3_delta = z3
+
+z_g_2 = fun_plot_tnd_cc(z1, "", title="16 - 17 years, Delta")
+print(z_g_2)
+ggsave("figure2a.svg", z_g_2)
+```
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+z_g_3 = fun_plot_tnd_ve(z3, "")
+print(z_g_3)
+
+```
+
+###Vaccine Effects
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+
+z_tab <- kableExtra::kbl(z3, 
+                         caption = "Numbers and Vaccine Effects", digits=c(NA,0,0,1,1,1),
+                         col.names = c("Vaccine Status","N","Events", "VE", "LCL","UCL"),
+                         format = "pipe") %>%
+  kableExtra::kable_classic(full_width = F, html_font = "Cambria", position = "left") %>%
+  kableExtra::column_spec(1:6, width="5em") %>% 
+  #kableExtra::column_spec(c(4,7,10), width="5em") %>% 
+  #kableExtra::add_header_above(c(" " = 4, "Rate Ratio" = 3, "Vaccine Effect" = 3))
+
+print(z_tab)
+
+```
+
+##Pfizer Vaccine for dose 1 and 2 S Negative (Omicron infections) 
+### Risk Ratios
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+options(knitr.kable.NA = '')
+
+z_df <- df_cc_16_17 %>% filter(vacc_type %in% c("uv", "PB"))
+
+eqn = as.formula(paste("event_s_neg"," ~ strata(EAVE_LINKNO_pos) + vs + ",
+            paste(variables_hosp, collapse= " + ")))
+   
+ret = run_model(eqn, z_df, "event_s_neg")
+
+z_g = ret$z_g
+z3 = ret$z3
+z1 = ret$z1
+
+z3_omicron = z3
+
+z_g_2 = fun_plot_tnd_cc(z1, "", title="16 - 17 years, Omicron")
+print(z_g_2)
+ggsave("figure2b.svg", z_g_2)
+```
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+z_g_3 = fun_plot_tnd_ve(z3, "")
+print(z_g_3)
+
+```
+###Vaccine Effects
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+
+z_tab <- kableExtra::kbl(z3, 
+                         caption = "Numbers and Vaccine Effects", digits=c(NA,0,0,1,1,1),
+                         col.names = c("Vaccine Status","N","Events", "VE", "LCL","UCL"),
+                         format = "pipe") %>%
+  kableExtra::kable_classic(full_width = F, html_font = "Cambria", position = "left") %>%
+  kableExtra::column_spec(1:6, width="5em") %>% 
+  #kableExtra::column_spec(c(4,7,10), width="5em") %>% 
+  #kableExtra::add_header_above(c(" " = 4, "Rate Ratio" = 3, "Vaccine Effect" = 3))
+
+print(z_tab)
+
+```
+
+## VE for both
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+z_g_3 = fun_plot_tnd_ve_both_variants(z3_delta, z3_omicron, "")
+print(z_g_3)
+```
+
+## Producing the table for the paper
+```{r, results='asis', include=TRUE, fig.width=12, fig.height=6}
+z3_delta = z3_delta %>% mutate(events_delta = R, ve_delta = ve, lcl_delta = lcl, ucl_delta = ucl) %>%
+ select(vs, N, events_delta, ve_delta, lcl_delta, ucl_delta)
+
+# A hack to align the columns 
+z3_delta = z3_delta %>% add_row(vs="v2_10:13", N=0, events_delta=0, ve_delta=0, lcl_delta=0, ucl_delta=0)
+z3_delta = z3_delta %>% add_row(vs="v2_14+", N=0, events_delta=0, ve_delta=0, lcl_delta=0, ucl_delta=0)
+
+z3_omicron = z3_omicron %>% mutate(events_omicron = R, ve_omicron = ve, lcl_omicron = lcl, ucl_omicron = ucl) %>%
+ select(N, events_omicron, ve_omicron, lcl_omicron, ucl_omicron)
+
+# levels = c("uv", "v1_0:1", "v1_2:5", "v1_6:9", , "v1_14:17", "v1_18+", "v2_0:1", "v2_2:5", "v2_6:9", )
+
+
+z_combined = z3_delta %>% bind_cols(z3_omicron)
+ 
+z_tab <- kableExtra::kbl(z_combined, 
+                          caption = "Numbers and Vaccine Effects", digits=c(NA,0,0,1,1,1, 0, 0, 1, 1, 1),
+                          col.names = c("Vaccine Status","N","Events", "VE", "LCL","UCL", "N", "Events", "VE", "LCL", "UCL"),
+                          format = "pipe") %>%
+   kableExtra::kable_classic(full_width = F, html_font = "Cambria", position = "left")# %>%
+   #kableExtra::column_spec(1:6, width="5em") %>% 
+   #kableExtra::column_spec(c(4,7,10), width="5em") %>% 
+   #kableExtra::add_header_above(c(" " = 4, "Rate Ratio" = 3, "Vaccine Effect" = 3))
+# 
+ print(z_tab)
+```
+
+
+#12 - 15 year olds
+# Max Model
+
+##Pfizer Vaccine for dose 1 and 2 
+###Risk Ratios
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+options(knitr.kable.NA = '')
+
+z_df <- df_cc_12_15 %>% filter(vacc_type %in% c("uv", "PB"))
+
+eqn = as.formula(paste("event"," ~ strata(EAVE_LINKNO_pos) + vs + ",
+            paste(variables_hosp, collapse= " + ")))
+
+ret = run_model(eqn, z_df, "event")
+
+z_g = ret$z_g
+z3 = ret$z3
+z1 = ret$z1
+
+z_g_2 = fun_plot_tnd_cc(z1, "")
+print(z_g_2)
+ggsave("figure2c.svg", z_g_2)
+```
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+z_g_3 = fun_plot_tnd_ve(z3, "")
+print(z_g_3)
+
+```
+
+###Vaccine Effects
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+
+z_tab <- kableExtra::kbl(z3, 
+                         caption = "Numbers and Vaccine Effects", digits=c(NA,0,0,1,1,1),
+                         col.names = c("Vaccine Status","N","Events", "VE", "LCL","UCL"),
+                         format = "pipe") %>%
+  kableExtra::kable_classic(full_width = F, html_font = "Cambria", position = "left") %>%
+  kableExtra::column_spec(1:6, width="5em") %>% 
+  #kableExtra::column_spec(c(4,7,10), width="5em") %>% 
+  #kableExtra::add_header_above(c(" " = 4, "Rate Ratio" = 3, "Vaccine Effect" = 3))
+
+print(z_tab)
+
+```
+
+##Pfizer Vaccine for dose 1 and 2 S Positive (Delta infections) 
+###Risk Ratios
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+options(knitr.kable.NA = '')
+
+z_df <- df_cc_12_15 %>% filter(vacc_type %in% c("uv", "PB"))
+
+# Remove any later vaccine statuses - they just mess up the figures and don't contribute to any events
+z_df = z_df %>% filter(!(vs == "v2_10:13" | vs == "v2_14+"))
+z_df$vs = droplevels(z_df$vs)
+z_df$vs = fct_recode(z_df$vs, "v2_6+" = "v2_6:9")
+eqn = as.formula(paste("event_s_pos"," ~ strata(EAVE_LINKNO_pos) + vs + ",
+            paste(variables_hosp, collapse= " + ")))
+              
+ret = run_model(eqn, z_df, "event_s_pos")
+
+z_g = ret$z_g
+z3 = ret$z3
+z1 = ret$z1
+z3_delta = z3
+z_g_2 = fun_plot_tnd_cc(z1, "", title="12 - 15 years, Delta")
+print(z_g_2)
+ggsave("figure2d.svg", z_g_2)
+
+```
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+z_g_3 = fun_plot_tnd_ve(z3, "")
+print(z_g_3)
+
+```
+
+###Vaccine Effects
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+
+z_tab <- kableExtra::kbl(z3, 
+                         caption = "Numbers and Vaccine Effects", digits=c(NA,0,0,1,1,1),
+                         col.names = c("Vaccine Status","N","Events", "VE", "LCL","UCL"),
+                         format = "pipe") %>%
+  kableExtra::kable_classic(full_width = F, html_font = "Cambria", position = "left") %>%
+  kableExtra::column_spec(1:6, width="5em") %>% 
+  #kableExtra::column_spec(c(4,7,10), width="5em") %>% 
+  #kableExtra::add_header_above(c(" " = 4, "Rate Ratio" = 3, "Vaccine Effect" = 3))
+
+print(z_tab)
+
+```
+
+##Pfizer Vaccine for dose 1 and 2 S Negative (Omicron infections) 
+### Risk Ratios
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+options(knitr.kable.NA = '')
+
+z_df <- df_cc_12_15 %>% filter(vacc_type %in% c("uv", "PB"))
+
+eqn = as.formula(paste("event_s_neg"," ~ strata(EAVE_LINKNO_pos) + vs + ",
+            paste(variables_hosp, collapse= " + ")))
+   
+z <- clogit(eqn, data=z_df, method="efron")
+
+ret = run_model(eqn, z_df, "event_s_neg")
+
+z_g = ret$z_g
+z3 = ret$z3
+z1 = ret$z1
+z3_omicron = z3
+z_g_2 = fun_plot_tnd_cc(z1, "", title="12 - 15 years, Omicron")
+print(z_g_2)
+```
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+z_g_3 = fun_plot_tnd_ve(z3, "")
+print(z_g_3)
+
+```
+###Vaccine Effects
+
+```{r,  results='asis', include=TRUE, fig.width=12, fig.height=6}
+
+z_tab <- kableExtra::kbl(z3, 
+                         caption = "Numbers and Vaccine Effects", digits=c(NA,0,0,1,1,1),
+                         col.names = c("Vaccine Status","N","Events", "VE", "LCL","UCL"),
+                         format = "pipe") %>%
+  kableExtra::kable_classic(full_width = F, html_font = "Cambria", position = "left") %>%
+  kableExtra::column_spec(1:6, width="5em") %>% 
+  #kableExtra::column_spec(c(4,7,10), width="5em") %>% 
+  #kableExtra::add_header_above(c(" " = 4, "Rate Ratio" = 3, "Vaccine Effect" = 3))
+
+print(z_tab)
+
+```
+
+## Producing the table for the paper
+```{r, results='asis', include=TRUE, fig.width=12, fig.height=6}
+z3_delta = z3_delta %>% mutate(events_delta = R, ve_delta = ve, lcl_delta = lcl, ucl_delta = ucl) %>%
+ select(vs, N, events_delta, ve_delta, lcl_delta, ucl_delta)
+
+# A hack to align the columns 
+z3_delta = z3_delta %>% add_row(vs="v2_10:13", N=0, events_delta=0, ve_delta=0, lcl_delta=0, ucl_delta=0)
+z3_delta = z3_delta %>% add_row(vs="v2_14+", N=0, events_delta=0, ve_delta=0, lcl_delta=0, ucl_delta=0)
+
+z3_omicron = z3_omicron %>% mutate(events_omicron = R, ve_omicron = ve, lcl_omicron = lcl, ucl_omicron = ucl) %>%
+ select(N, events_omicron, ve_omicron, lcl_omicron, ucl_omicron)
+
+# levels = c("uv", "v1_0:1", "v1_2:5", "v1_6:9", , "v1_14:17", "v1_18+", "v2_0:1", "v2_2:5", "v2_6:9", )
+
+
+z_combined = z3_delta %>% bind_cols(z3_omicron)
+ 
+z_tab <- kableExtra::kbl(z_combined, 
+                          caption = "Numbers and Vaccine Effects", digits=c(NA,0,0,1,1,1, 0, 0, 1, 1, 1),
+                          col.names = c("Vaccine Status","N","Events", "VE", "LCL","UCL", "N", "Events", "VE", "LCL", "UCL"),
+                          format = "pipe") %>%
+   kableExtra::kable_classic(full_width = F, html_font = "Cambria", position = "left")# %>%
+   #kableExtra::column_spec(1:6, width="5em") %>% 
+   #kableExtra::column_spec(c(4,7,10), width="5em") %>% 
+   #kableExtra::add_header_above(c(" " = 4, "Rate Ratio" = 3, "Vaccine Effect" = 3))
+# 
+ print(z_tab)
+```
+
+
+

@@ -1,0 +1,312 @@
+---
+title: "Vaccine Uptake in CYP"
+output: html_document
+df_print: tibble
+---
+
+```{r include=FALSE}
+library(rmarkdown)
+library(readr)
+library(table1)
+library(labelled)
+library(knitr)
+library(kableExtra)
+
+source("00_Functions.R")
+
+z_df = df
+z_df_vulnerable = df_vulnerable
+
+process_uptake_df = function(z_df) {
+  # Label the various columns for the table 1 package
+  # so they look nice
+  z_df = z_df %>% mutate(Value = TRUE)
+  label(z_df$simd2020_sc_quintile) = "SIMD2020 Quintile"
+  label(z_df$age_range_group) = "Age"
+  label(z_df$age_gp) = "Age"
+  label(z_df$vacc_type) = "1st Dose Type"
+  label(z_df$vacc_type_2) = "2nd Dose Type"
+  return(z_df)
+}
+
+z_df = process_uptake_df(z_df)
+z_df_vulnerable = process_uptake_df(z_df_vulnerable)
+
+z_df = z_df %>% mutate(vacc_1_dose = factor(is.na(z_df$date_vacc_1), labels=c("Vaccinated", "Unvaccinated")))
+z_df = z_df %>% mutate(vacc_2_dose = factor(is.na(z_df$date_vacc_2), labels=c("Vaccinated", "Unvaccinated")))
+z_df = z_df %>% mutate(vacc_3_dose = factor(is.na(z_df$date_vacc_3), labels=c("Vaccinated", "Unvaccinated")))
+label(z_df$vacc_1_dose) = "1st Dose"
+label(z_df$vacc_2_dose) = "2nd Dose"
+label(z_df$vacc_3_dose) = "3rd Dose"
+
+# Everyone in the vulnerable cohort by definiton has a first dose,
+# but process their second and third doses
+z_df_vulnerable = z_df_vulnerable %>% mutate(vacc_1_dose = TRUE) %>% mutate(vacc_1_dose = factor(vacc_1_dose, labels = c("Vaccinated")))
+z_df_vulnerable = z_df_vulnerable %>% mutate(vacc_2_dose = factor(is.na(z_df_vulnerable$date_vacc_2), labels=c("Vaccinated", "Unvaccinated")))
+z_df_vulnerable = z_df_vulnerable %>% mutate(vacc_3_dose = factor(is.na(z_df_vulnerable$date_vacc_3), labels=c("Vaccinated", "Unvaccinated")))
+```
+## Characteristics of entire cohort
+```{r, paged.print=FALSE, message=FALSE, warning=FALSE}
+print(summary_factorlist_wt(z_df, "Value", c("Sex", "simd2020_sc_quintile","age_range_group", "vacc_1_dose", "vacc_2_dose", "vacc_3_dose", "vacc_type", "vacc_type_2", "age_at_vacc_1")), n=1000)
+```
+
+
+
+## Doses by age group
+### 16 and 17 year olds
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+z_df_age_group = z_df %>% filter(age_range_group == "16 - 17") %>% mutate(age_gp = droplevels(age_gp)) 
+z_df_age_group$t_vacc_1 = z_df_age_group$date_vacc_1 - a_begin_16_17
+z_df_age_group$t_vacc_2 = z_df_age_group$date_vacc_2 - a_begin_16_17
+z_df_age_group$t_vacc_3 = z_df_age_group$date_vacc_3 - a_begin_16_17
+
+first_doses_given = z_df_age_group %>% 
+                 dplyr::count(t_vacc_1, wt = eave_weight) %>% mutate(Count = cumsum(n)/nrow(z_df_age_group)) 
+second_doses_given = z_df_age_group %>% 
+                 dplyr::count(t_vacc_2, wt = eave_weight) %>% mutate(Count = cumsum(n)/nrow(z_df_age_group)) 
+third_doses_given = z_df_age_group %>% 
+                 dplyr::count(t_vacc_3, wt = eave_weight) %>% mutate(Count = cumsum(n)/nrow(z_df_age_group))
+
+# This ensures we keep those vaccinated before the start of the vaccination program while 
+# not showing them on the timeline
+first_doses_given = first_doses_given %>% mutate(date_vacc_1 = t_vacc_1 + a_begin_16_17) %>%
+  filter(date_vacc_1 >= a_begin_16_17)
+second_doses_given = second_doses_given %>% mutate(date_vacc_2 = t_vacc_2 + a_begin_16_17) %>%
+  filter(date_vacc_2 >= a_begin_16_17)
+#third_doses_given = third_doses_given %>% mutate(date_vacc_3 = t_vacc_3 + a_begin_16_17) %>%
+#  filter(date_vacc_3 >= a_begin_16_17)
+
+#plot(first_doses_given$date_vacc_1 ,first_doses_given$Count *100, axes = FALSE, xlab = "Month and Year", ylab = "Vaccine Coverage", col='blue', ylim=c(0, 100), xlim=c(a_begin_16_17, a_end))
+#points(second_doses_given$date_vacc_2,second_doses_given$Count * 100, xlab = "Month and Year", ylab = "Vaccine Coverage", col='red')
+#axis(2, at = c(0, 20, 40, 60, 80, 100), labels = c("0%", "20%", "40%", "60%", "80%", "100%"))
+#axis(1, at = as.Date(c("2021-08-01", "2021-09-01", "2021-10-01", "2021-11-01", "2021-12-01", "2022-01-01", "2022-02-01", "2022-03-01")), labels = c("Aug", "Sept", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"))
+g = ggplot() + geom_line(first_doses_given, mapping=aes(x=date_vacc_1, y=Count*100, colour="1st Dose")) +
+  geom_line(second_doses_given, mapping=aes(x=date_vacc_2, y=Count*100, colour="2nd Dose")) +   scale_colour_manual("Age: 16 - 17 Years", 
+                      breaks = c("1st Dose", "2nd Dose"),
+                      values = c("blue", "red")) +
+  scale_x_date(breaks="1 month", date_labels="%b %Y") + xlab("Date") + ylim(0, 100) + ylab("Vaccine Coverage (%)") +
+  xlab("Month and Year") + theme_bw() + theme(legend.position = c(0.8, 0.9)) + geom_segment(aes(x = as.Date("2021-08-06"), y = 55, xend = as.Date("2021-08-06"), yend = 0), arrow = arrow(length = unit(0.3, "cm"))) +
+  annotate("text", x = as.Date("2021-09-01"), y = 65, 
+label="1st dose introduced on
+6 August 2021
+2nd dose - 12 weeks later")
+
+print(g)
+ggsave("figure1a.svg", g)
+#points(third_doses_given$date_vacc_3,third_doses_given$Count, xlab = "Time", ylab = "Number of Doses", col='green')
+```
+
+### 12 to 15 year olds
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+z_df_age_group = z_df %>% filter(age_range_group == "12 - 15") %>% mutate(age_gp = droplevels(age_gp))
+z_df_age_group$t_vacc_1 = z_df_age_group$date_vacc_1 - a_begin_12_15
+z_df_age_group$t_vacc_2 = z_df_age_group$date_vacc_2 - a_begin_12_15
+z_df_age_group$t_vacc_3 = z_df_age_group$date_vacc_3 - a_begin_12_15
+
+# Remove any vaccinations given before the start date, but keep any unvaccinated people
+#z_df_age_group = z_df_age_group %>% filter(is.na(t_vacc_1) | t_vacc_1 > 0)
+
+first_doses_given = z_df_age_group %>% dplyr::count(t_vacc_1, wt = eave_weight) %>% mutate(Count = cumsum(n)/nrow(z_df_age_group))
+second_doses_given = z_df_age_group %>% dplyr::count(t_vacc_2, wt = eave_weight) %>% mutate(Count = cumsum(n)/nrow(z_df_age_group))
+#third_doses_given = z_df_age_group %>% dplyr::count(t_vacc_3, wt = eave_weight) %>% mutate(Count = cumsum(n)/nrow(z_df_age_group))
+
+# This ensures we keep those vaccinated before the start of the vaccination program while 
+# not showing them on the timeline
+first_doses_given = first_doses_given %>% mutate(date_vacc_1 = t_vacc_1 + a_begin_12_15) %>%
+  filter(date_vacc_1 >= a_begin_16_17)
+second_doses_given = second_doses_given %>% mutate(date_vacc_2 = t_vacc_2 + a_begin_12_15)  %>%
+  filter(date_vacc_2 >= a_begin_16_17)
+#third_doses_given = third_doses_given %>% mutate(date_vacc_3 = t_vacc_3 + a_begin_12_15)  %>%
+#  filter(date_vacc_3 >= a_begin_16_17)
+ 
+g = ggplot() + geom_line(first_doses_given, mapping=aes(x=date_vacc_1, y=Count*100, color="1st Dose")) +
+  geom_line(second_doses_given, mapping=aes(x=date_vacc_2, y=Count*100, color="2nd Dose")) +
+  scale_colour_manual("Age: 12 - 15 Years", 
+                      breaks = c("1st Dose", "2nd Dose"),
+                      values = c("blue", "red")) +
+  scale_x_date(breaks="1 month", date_labels="%b %Y") + xlab("Date") + ylim(0, 100) + ylab("Vaccine Coverage (%)") +
+  xlab("Month and Year") + theme_bw() + theme(legend.position = c(0.8, 0.9)) + geom_segment(aes(x = as.Date("2021-09-20"), y = 55, xend = as.Date("2021-09-20"), yend = 0), arrow = arrow(length = unit(0.3, "cm"))) +   annotate("text", x = as.Date("2021-10-05"), y = 65, 
+label="1st dose introduced on
+20 September 2021
+2nd dose - 12 weeks later")
+
+#plot(first_doses_given$date_vacc_1,first_doses_given$Count *100, axes=FALSE, xlab = "Month and Year", ylab = "Vaccine Coverage", col='blue', ylim=c(0, 100), xlim=c(a_begin_16_17, a_end))
+#points(second_doses_given$date_vacc_2, second_doses_given$Count * 100, xlab = "Month and Year", ylab = "Vaccine Coverage", col='red')
+#points(third_doses_given$date_vacc_3, third_doses_given$Count, xlab = "Time", ylab = "Number of Doses", col='green')
+
+#axis(2, at = c(0, 20, 40, 60, 80, 100), labels = c("0%", "20%", "40%", "60%", "80%", "100%"))
+#axis(1, at = as.Date(c("2021-08-01", "2021-09-01", "2021-10-01", "2021-11-01", "2021-12-01", "2022-01-01", "2022-02-01", "2022-03-01")), labels = c("Aug", "Sept", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"))
+ggsave("figure1b.svg", g)
+print(g)
+```
+
+# Uptake of first dose
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+kable(summary_factorlist_wt(z_df, "vacc_1_dose", c("age_range_group")))
+```
+
+# Uptake of second dose
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+summary_factorlist_wt(z_df, "vacc_2_dose", c("age_range_group"))
+```
+
+# Breakdowns of each age group
+## 12 - 15 year olds
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE} 
+z_df_12_15 = z_df %>% filter(age_range_group == "12 - 15") %>% mutate(age_gp = droplevels(age_gp))
+
+# Have to relabel the age group after removing the unused levels
+label(z_df_12_15$age_gp) = "Age"
+
+summary_factorlist_wt(z_df_12_15, "vacc_1_dose", c("Sex", "simd2020_sc_quintile","age_gp"))
+```
+
+## 16 and 17 year olds
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+z_df_16_17 = z_df %>% filter(age_range_group == "16 - 17") %>% mutate(age_gp = droplevels(age_gp))
+
+# Have to relabel the age group after removing the unused levels
+label(z_df_16_17$age_gp) = "Age"
+
+summary_factorlist_wt(z_df_16_17, "vacc_1_dose", c("Sex", "simd2020_sc_quintile","age_gp"))
+```
+
+# Uptake of second dose in each age group
+
+## 12 - 15 year olds
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE} 
+z_df_12_15 = z_df %>% filter(age_range_group == "12 - 15") %>% mutate(age_gp = droplevels(age_gp))
+
+# Have to relabel the age group after removing the unused levels
+label(z_df_12_15$age_gp) = "Age"
+
+summary_factorlist_wt(z_df_12_15, "vacc_2_dose", c("Sex", "simd2020_sc_quintile","age_gp"))
+```
+
+## 16 and 17 year olds
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+z_df_16_17 = z_df %>% filter(age_range_group == "16 - 17") %>% mutate(age_gp = droplevels(age_gp))
+
+# Have to relabel the age group after removing the unused levels
+label(z_df_16_17$age_gp) = "Age"
+
+summary_factorlist_wt(z_df_16_17, "vacc_2_dose", c("Sex", "simd2020_sc_quintile","age_gp"))
+```
+
+# Vulnerable children
+## How many received a vaccine before the start of the program
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+qcovid_columns = grepl("Q_" ,names(z_df_vulnerable))
+qcovid_columns_names = names(z_df_vulnerable)[qcovid_columns]
+
+# Remove BMI cos it has lots of levels we don't care about
+qcovid_columns_names = qcovid_columns_names[qcovid_columns_names != "Q_BMI"]
+qcovid_columns[qcovid_columns_names == "Q_BMI"] = FALSE
+
+# Create an extra column to hold if the person has a qcovid comorbidity
+qcovid_comorbidity = apply(z_df_vulnerable[,qcovid_columns], 1, function(r) any(r == 1))
+
+z_df_vulnerable[, qcovid_columns] = lapply(z_df_vulnerable[,qcovid_columns], factor)
+
+z_df_vulnerable$qcovid_comorbidity = factor(qcovid_comorbidity)
+qcovid_columns_names = c(qcovid_columns_names, "qcovid_comorbidity")
+
+print(sum(z_df_vulnerable$eave_weight))
+kable(summary_factorlist_wt(z_df_vulnerable, "Value", c("Sex", "simd2020_sc_quintile","age_range_group", "vacc_2_dose", "vacc_type", "qcovid_comorbidity"))) %>% kable_styling(full_width = F)
+```
+
+## How many of these children have some QCOVID comorbidity?
+```{r echo = FALSE, message = FALSE, paged.print=FALSE}
+
+kable(summary_factorlist_wt(z_df_vulnerable, "Value", qcovid_columns_names)) %>% kable_styling(full_width = F) # Force it to print all rows
+```
+
+## Build full table
+```{r echo = FALSE, message = FALSE, paged.print = FALSE}
+build_igors_table = function(z_df) {
+  columns = c("vacc_1_dose", "vacc_2_dose")
+  column_labels = c("1st Dose", "2nd Dose")
+  z_table_overall = list()
+  
+  total_pop = sum(z_df$eave_weight)
+  
+  for (i in 1:length(columns)) {
+    col = columns[i]
+    z_table =  
+      z_df %>% filter(age_range_group == "16 - 17") %>% filter(Sex == "M") %>%
+      group_by(!!sym(col)) %>% summarise(n = sum(eave_weight)) %>% mutate(percentage = n/sum(n) * 100) %>% rename("M 16 - 17" = n, dose = !!sym(col), "M 16 - 17 %" = percentage)
+    z_table = z_table %>% add_column( 
+      z_df %>% filter(age_range_group == "16 - 17") %>% filter(Sex == "F") %>%
+      group_by(!!sym(col)) %>% summarise(n = sum(eave_weight)) %>%  mutate(percentage = n/sum(n) * 100) %>% rename("F 16 - 17" = n, dose = !!sym(col), "F 16 - 17 %" = percentage) %>% select("F 16 - 17", "F 16 - 17 %"))
+    z_table = z_table %>% add_column( 
+      z_df %>% filter(age_range_group == "12 - 15") %>% filter(Sex == "M") %>%
+      group_by(!!sym(col)) %>% summarise(n = sum(eave_weight)) %>%  mutate(percentage = n/sum(n) * 100) %>% rename("M 12 - 15" = n, dose = !!sym(col), "M 12 - 15 %" = percentage) %>% select("M 12 - 15", "M 12 - 15 %"))
+    z_table = z_table %>% add_column( 
+      z_df %>% filter(age_range_group == "12 - 15") %>% filter(Sex == "F") %>%
+      group_by(!!sym(col)) %>% summarise(n = sum(eave_weight)) %>%  mutate(percentage = n/sum(n) * 100) %>% rename("F 12 - 15" = n, dose = !!sym(col), "F 12 - 15 %" = percentage) %>% select("F 12 - 15", "F 12 - 15 %"))
+    z_table = z_table %>% add_column(
+      z_df %>% group_by(!!sym(col)) %>% summarise(n = sum(eave_weight)) %>% mutate(percentage = n/total_pop * 100) %>% rename("Total" = n, dose = !!sym(col), "Total %" = percentage) %>% select("Total", "Total %"))
+    z_table$label = column_labels[i]
+    z_table_overall[[i]] = z_table
+  }
+  
+  # Set up the final row which contains the total of each demographic category
+  z_table =  
+      z_df %>% filter(age_range_group == "16 - 17") %>% filter(Sex == "M") %>% summarise(n = sum(eave_weight)) %>% 
+      mutate(percentage = n / total_pop * 100) %>% 
+      rename("M 16 - 17" = n, "M 16 - 17 %" = percentage)
+  
+  z_table =  z_table %>% add_column(
+      z_df %>% filter(age_range_group == "16 - 17") %>% filter(Sex == "F") %>% summarise(n = sum(eave_weight)) %>%
+        rename("F 16 - 17" = n))
+  
+  z_table =  z_table %>% add_column(
+      z_df %>% filter(age_range_group == "12 - 15") %>% filter(Sex == "M") %>% summarise(n = sum(eave_weight)) %>%
+        rename("M 12 - 15" = n))
+  
+  z_table =  z_table %>% add_column(
+      z_df %>% filter(age_range_group == "12 - 15") %>% filter(Sex == "F") %>% summarise(n = sum(eave_weight)) %>%
+        rename("F 12 - 15" = n))
+
+  
+  z_table =  z_table %>% add_column(label = "Total")
+  z_table =  z_table %>% add_column(
+    z_df %>% summarise(n = sum(eave_weight)) %>% rename("Total" = n)  
+  )
+  z_table =  z_table %>% add_column(
+    dose = "Any"
+  )
+  
+  
+  z_table_output = z_table_overall[[1]]
+  z_table_output = z_table_output %>% add_row(z_table_overall[[2]]) %>% add_row(z_table) %>% relocate(label)
+  
+  # Now make it look nice
+  # Percentages to 3 s.f.
+  z_table_output = z_table_output %>% mutate(across(c("F 12 - 15 %", "M 12 - 15 %", "F 16 - 17 %", "M 16 - 17 %", "Total %"), ~formatC(round(.,1), format = "f", big.mark = ",", drop0trailing = TRUE)))
+  
+  # Numbers to integers
+  z_table_output = z_table_output %>% mutate_if(is.numeric, ~formatC(round(.,0), format = "f", big.mark = ",", drop0trailing = TRUE))
+  return(z_table_output)
+}
+
+z_table_output = build_igors_table(z_df)
+
+kable(z_table_output) %>% kable_styling(full_width = F)
+```
+# Table for vulnerable population
+## (Vacinated before the official program starts)
+```{r echo = FALSE, message = FALSE, paged.print=FALSE}
+z_table_output = build_igors_table(z_df_vulnerable)
+kable(z_table_output) %>% kable_styling(full_width = F)
+```
+
+# Hospitalisations in cohort
+
+```{r echo = FALSE, message = FALSE, paged.print=FALSE}
+z_hosp = z_df %>% filter(!is.na(z_df$covid_hosp_date)) %>%
+  filter(!is.na(flag_covid_symptomatic) & flag_covid_symptomatic == 1)
+print(nrow(z_hosp))
+print(summary_factorlist_wt(z_hosp, "Value", c("Sex", "simd2020_sc_quintile","age_range_group", "vacc_1_dose", "vacc_2_dose", "vacc_3_dose", "vacc_type", "vacc_type_2")), n=1000)
+```
